@@ -1,0 +1,175 @@
+# Project Aethelred - Developer Edition
+# Docker Compose Configuration
+
+services:
+  # Tier 0: Hot Memory (Redis)
+  redis:
+    image: redis:7-alpine
+    container_name: aethelred-redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - aethelred-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Tier 1: Warm Memory (PostgreSQL)
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aethelred-postgres
+    environment:
+      POSTGRES_DB: aethelred
+      POSTGRES_USER: aethelred
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development}
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./schemas/database/01-init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - aethelred-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aethelred"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Tier 2: Cold Memory (Neo4j)
+  neo4j:
+    image: neo4j:5-community
+    container_name: aethelred-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-development}
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_pagecache_size: 512M
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j-data:/data
+      - ./schemas/database/02-init-neo4j.cypher:/import/init.cypher
+    networks:
+      - aethelred-network
+    healthcheck:
+      test: ["CMD", "neo4j-admin", "dbms", "check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Message Queue (for event bus)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: aethelred-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: aethelred
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-development}
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - aethelred-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Observability - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aethelred-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    networks:
+      - aethelred-network
+
+  # Observability - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aethelred-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    networks:
+      - aethelred-network
+    depends_on:
+      - prometheus
+
+  # Observability - Jaeger
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: aethelred-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: 9411
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Collector
+    networks:
+      - aethelred-network
+
+  # Main Application (placeholder - to be replaced with actual agent containers)
+  aethelred-core:
+    build:
+      context: ..
+      dockerfile: Dockerfile.dev
+    container_name: aethelred-core
+    environment:
+      PYTHONPATH: /app
+      AETHELRED_ENV: development
+      REDIS_HOST: redis
+      POSTGRES_HOST: postgres
+      NEO4J_URI: bolt://neo4j:7687
+      RABBITMQ_HOST: rabbitmq
+      JAEGER_ENDPOINT: http://jaeger:14268/api/traces
+    volumes:
+      - ../:/app
+      - ../aethelred_archive:/archive
+    networks:
+      - aethelred-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: ["python", "main.py"]
+
+volumes:
+  redis-data:
+  postgres-data:
+  neo4j-data:
+  rabbitmq-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  aethelred-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

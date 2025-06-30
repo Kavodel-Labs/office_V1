@@ -1,0 +1,238 @@
+# Project Aethelred - Master Configuration
+# Version: 6.0
+
+system:
+  name: aethelred
+  edition: developer  # Options: developer, production
+  version: "6.0.0"
+  
+  # System-wide settings
+  timezone: UTC
+  log_level: INFO  # DEBUG, INFO, WARN, ERROR
+  
+cognitive:
+  # Memory architecture configuration
+  memory_tiers:
+    - name: hot
+      type: cache
+      backend: redis
+      config:
+        host: redis
+        port: 6379
+        db: 0
+        password: ""
+        ttl: 3600  # 1 hour
+        max_memory: 2GB
+        eviction_policy: lru
+        persistence:
+          enabled: true
+          strategy: rdb  # Options: rdb, aof, both
+          
+    - name: warm
+      type: persistent
+      backend: postgresql
+      config:
+        host: postgres
+        port: 5432
+        database: aethelred
+        user: aethelred
+        password: development
+        pool_size: 20
+        extensions:
+          - pgvector
+          - pg_stat_statements
+        retention:
+          events: 30d
+          scores: 90d
+          
+    - name: cold
+      type: graph
+      backend: neo4j
+      config:
+        uri: bolt://neo4j:7687
+        user: neo4j
+        password: development
+        max_connections: 50
+        
+    - name: archive
+      type: object_store
+      backend: filesystem  # Options: filesystem, s3, gcs
+      config:
+        filesystem:
+          path: ./aethelred_archive
+          
+  # Memory coherence settings
+  coherence:
+    write_through:
+      enabled: true
+      targets: [hot, warm]
+      critical_events:
+        - task.status_changed
+        - agent.decision_made
+        - system.configuration_changed
+        
+    consistency_windows:
+      eventual: 5s
+      strong: immediate
+      
+communication:
+  # Event bus configuration
+  event_bus:
+    backend: redis_streams
+    config:
+      max_len: 100000  # Max events per stream
+      retention: 7d
+      consumer_groups:
+        - name: auditors
+          agents: ["S_Auditor_v*"]
+        - name: workers
+          agents: ["D_*"]
+        - name: coordinators
+          agents: ["B_*"]
+          
+  # Task management integration
+  task_master:
+    enabled: true
+    config:
+      max_concurrent_tasks: 50
+      task_timeout: 1h
+      checkpoint_interval: 5m
+      
+agents:
+  # Default agent configuration
+  defaults:
+    runtime: python3.11
+    restart_policy: always
+    health_check:
+      enabled: true
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      
+  # Resource limits
+  resource_limits:
+    apex:
+      cpu: 1000m
+      memory: 2Gi
+    brigade:
+      cpu: 750m
+      memory: 1.5Gi
+    doer:
+      cpu: 500m
+      memory: 1Gi
+    service:
+      cpu: 500m
+      memory: 1Gi
+      
+  # Agent roster with specific configurations
+  roster:
+    # Apex Tier
+    - id: A_Grandmaster_v1
+      tier: apex
+      role: Strategic Architect
+      enabled: false  # Start with minimal set
+      replicas: 1
+      capabilities:
+        - system.vision.read
+        - system.vision.write
+        - agents.strategy.define
+        
+    - id: A_ChiefOfStaff_v1
+      tier: apex
+      role: System Governor
+      enabled: true
+      replicas: 1
+      capabilities:
+        - system.config.*
+        - agents.evolution.*
+        - rules.governance.*
+        - tasks.routing
+        
+    # Service Tier
+    - id: S_Auditor_v1
+      tier: service
+      role: Performance Observer
+      enabled: true
+      replicas: 1
+      capabilities:
+        - agents.observe
+        - metrics.write
+        - scores.calculate
+        
+    - id: S_Secretary_v1
+      tier: service
+      role: Communication Manager
+      enabled: true
+      replicas: 1
+      capabilities:
+        - communications.external
+        - tasks.receive
+        - notifications.send
+        
+    # Doer Tier
+    - id: D_Developer_v1
+      tier: doer
+      role: MCP Development Specialist
+      enabled: true
+      replicas: 1
+      capabilities:
+        - code.backend.*
+        - code.frontend.*
+        - code.review
+        - tests.write
+        - tests.execute
+        - tasks.execute
+        
+metacognition:
+  # Evolution system configuration
+  evolution:
+    enabled: false  # Start disabled for development
+    strategy: progressive  # Options: progressive, blue_green, canary
+    
+security:
+  # Development settings - simplified for local
+  authentication:
+    method: none  # Options: mtls, jwt, oauth2, none
+    
+  # Audit configuration
+  audit:
+    enabled: true
+    backend: append_only
+    
+observability:
+  # Telemetry configuration
+  telemetry:
+    enabled: true
+    framework: opentelemetry
+    exporters:
+      traces:
+        backend: jaeger
+        endpoint: $JAEGER_ENDPOINT
+        sampling:
+          strategy: adaptive
+          initial_rate: 0.1
+      metrics:
+        backend: prometheus
+        endpoint: $PROMETHEUS_ENDPOINT
+        interval: 15s
+        
+deployment:
+  # Developer edition specific
+  developer:
+    compose_file: config/docker-compose.dev.yml
+    volumes:
+      code: ./
+      data: ./data
+      logs: ./logs
+
+agora:
+  llm_config:
+    openai_api_key: $OPENAI_API_KEY
+    anthropic_api_key: $ANTHROPIC_API_KEY
+    google_api_key: $GOOGLE_API_KEY
+    perplexity_api_key: $PERPLEXITY_API_KEY
+  budget_limits:
+    daily_limit: 10.0
+    session_limit: 2.0
+    loop_limit: 0.5
+  quality_threshold: 0.8

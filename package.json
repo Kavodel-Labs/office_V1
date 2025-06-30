@@ -1,0 +1,36 @@
+{
+  "name": "aethelred",
+  "version": "6.0.0",
+  "description": "Autonomous, self-improving AI workforce for software development",
+  "main": "index.js",
+  "scripts": {
+    "dev": "docker-compose -f config/docker-compose.dev.yml up",
+    "setup": "./scripts/setup/bootstrap-system.sh",
+    "test": "pytest tests/",
+    "task": "task-master-ai",
+    "task-init": "task-master-ai init",
+    "task-list": "task-master-ai list",
+    "task-status": "task-master-ai status"
+  },
+  "keywords": [
+    "ai",
+    "autonomous",
+    "software-development",
+    "multi-agent",
+    "cognitive-architecture",
+    "self-improving"
+  ],
+  "author": "Project Aethelred Team",
+  "license": "MIT",
+  "dependencies": {
+    "task-master-ai": "^0.18.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

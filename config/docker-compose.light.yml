@@ -1,0 +1,64 @@
+# Project Aethelred - Light Resource Docker Compose
+# Optimized for systems with limited memory
+
+services:
+  # Tier 0: Hot Memory (Redis) - Light Config
+  redis:
+    image: redis:7-alpine
+    container_name: aethelred-redis-light
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - ~/DockerData/AETHELRED/redis-data:/data
+    networks:
+      - aethelred-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Tier 1: Warm Memory (PostgreSQL) - Light Config
+  postgres:
+    image: postgres:16-alpine  # Lighter than pgvector version
+    container_name: aethelred-postgres-light
+    environment:
+      POSTGRES_DB: aethelred
+      POSTGRES_USER: aethelred
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-development}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ~/DockerData/AETHELRED/postgres-data:/var/lib/postgresql/data
+      - ./schemas/database/01-init-postgres-light.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - aethelred-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aethelred"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Archive Memory only (Skip Neo4j for now to save memory)
+  # Neo4j can be added later when needed
+
+# Using bind mounts to ~/DockerData instead of Docker volumes
+# No named volumes needed
+  
+networks:
+  aethelred-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
